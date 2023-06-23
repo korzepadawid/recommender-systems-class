@@ -1,0 +1,114 @@
+1. Train the model and save it as a joblib file (you can name it model.joblib). You can see an example in the lecture_15_aws_deployment.ipynb notebook. Remember to create the model folder in aws_deployment. Add a file with your model there too (it may only import modules from the same folder).
+
+
+2. Open bash, go to the folder aws_deployment/model and run the following command:
+
+tar -czvf model.tar.gz -C . *
+
+
+3. Upload the tar.gz file to S3 to a bucket of your choice (in this tutorial the bucket's name is rs-class-recommenders).
+
+
+4. Go to IAM on AWS and create two roles:
+- AmazonSageMaker-ExecutionRole
+This role should have the following permissions:
+	* AmazonSageMakerFullAccess
+	* AmazonS3FullAccess (probably read-only would suffice)
+- LambdaSageMakerRole
+This role should have the following permissions:
+	* AmazonSageMakerFullAccess
+	
+For details see: https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-roles.html.
+
+
+5. On AWS go to Amazon SageMaker. Create a SageMaker Model.
+Go to Inference, Models, click Create model. Fill the form as follows:
+- Model name: recommender
+- IAM Role: AmazonSageMaker-ExecutionRole
+- Choose "Provide model artifacts and inference image location"
+- Choose "Use single model"
+- Location of inference code image: 
+492215442770.dkr.ecr.eu-central-1.amazonaws.com/sagemaker-scikit-learn:0.23-1-cpu-py3 
+(this a predefined Docker image for sklearn-like models)
+- Location of model artifacts: s3://rs-class-recommenders/model.tar.gz
+- Provide the following environment variables:
+SAGEMAKER_CONTAINER_LOG_LEVEL=20
+SAGEMAKER_ENABLE_CLOUDWATCH_METRICS=false
+SAGEMAKER_PROGRAM=inference.py
+SAGEMAKER_REGION=eu-central-1
+SAGEMAKER_SUBMIT_DIRECTORY=s3://rs-class-recommenders/model.tar.gz
+
+
+6. Create a SageMaker Endpoint.
+Go to Inference, Endpoints, click Create endpoint. Fill in the form as follows:
+- Endpoint name: recommender
+- Choose Create a new endpoint configuration. Fill in Endpoint configuration name: recommender-endpoint-configuration
+- Type of endpoint: Provisioned
+- In Variants, Production click Create production variant and choose your model (recommender in our case). You can also change the instance type to any other, but keep costs in mind.
+- Click Create endpoint configuration and the Create endpoint.
+
+
+7. Go to Lambda and click Create function.
+Fill in the form:
+- Function name: recommender
+- Runtime: Python 3.7
+- Change default execution role -> Use an existing role -> choose LambdaSageMakerRole
+- Click Create function
+
+In Code source paste the following:
+import json
+import boto3
+
+def lambda_handler(event, context):
+    # Create a SageMaker runtime client
+    sagemaker = boto3.client('sagemaker-runtime')
+
+    # Extract user_ids and item_ids from the event
+    user_ids = event['user_ids']
+    item_ids = event['item_ids']
+
+    # Convert the lists to the format expected by your model
+    input_data = json.dumps({'user_ids': user_ids, 'item_ids': item_ids})
+
+    # Invoke the SageMaker endpoint
+    response = sagemaker.invoke_endpoint(
+        EndpointName='recommender',
+        Body=input_data,
+        ContentType='application/json'
+    )
+
+    # Parse the response
+    result = json.loads(response['Body'].read().decode())
+
+    # Return the result
+    return {
+        'statusCode': 200,
+        'body': result
+    }
+	
+Test with the following JSON:
+{
+  "user_ids": [1, 2],
+  "item_ids": [1, 2]
+}
+
+
+7. Go to API Gateway. Click Build under REST API. 
+
+Choose New API and set the name to recommender. Click Create API.
+
+Click Actions->Create Method. Choose POST and click the confirmation sign.
+
+Choose Lambda function and in Lambda Function start typing recommender. Choose the recommender Lambda and click Save.
+
+Click Actions->Enable CORS and confirm.
+
+Click Actions->Deploy API. In Deployment stage choose [New Stage] and set the stage name to recommender. Click Deploy.
+
+Copy the invoke URL and copy it into your code (for example the index.html in aws_deployment).
+
+
+
+
+
+
