@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# C extensions
+# c extensions
 *.so
 
 # Distribution / packaging
@@ -105,4 +105,6 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-simulation.spec
+*.tar.gz
+*.pkl
+*.joblib
